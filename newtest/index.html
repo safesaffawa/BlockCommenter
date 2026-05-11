@@ -144,6 +144,30 @@
       box-shadow: 0 2px 0 #5a1a1a, 0 3px 6px rgba(0,0,0,0.25);
     }
 
+    .btn-export {
+      background: #4a90d9;
+      border-color: #7ab8ff;
+      color: #f0f6ff;
+      text-shadow: 0 1px 0 #1a3a5a;
+      box-shadow: 0 4px 0 #2a5a8a, 0 4px 8px rgba(0,0,0,0.3);
+    }
+    .btn-export:active {
+      background: #3a7bc8;
+      box-shadow: 0 2px 0 #1a3a5a, 0 3px 6px rgba(0,0,0,0.25);
+    }
+
+    .btn-import {
+      background: #5a9a4a;
+      border-color: #8acf7a;
+      color: #f0fff0;
+      text-shadow: 0 1px 0 #1a3a1a;
+      box-shadow: 0 4px 0 #2a5a2a, 0 4px 8px rgba(0,0,0,0.3);
+    }
+    .btn-import:active {
+      background: #4a8a3a;
+      box-shadow: 0 2px 0 #1a3a1a, 0 3px 6px rgba(0,0,0,0.25);
+    }
+
     .grid-wrapper {
       background: #7c9a5e;
       border-radius: 1.5rem;
@@ -248,6 +272,29 @@
       border-radius: 1rem;
     }
 
+    #fileInput {
+      display: none;
+    }
+
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: #fff;
+      padding: 0.8rem 1.5rem;
+      border-radius: 2rem;
+      font-size: 0.9rem;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+    }
+
     @media (max-width: 600px) {
       .app-container {
         padding: 0.5rem;
@@ -264,6 +311,9 @@
   </style>
 </head>
 <body>
+<div id="toast" class="toast"></div>
+<input type="file" id="fileInput" accept=".json">
+
 <div class="app-container">
   <h1>
     📦 区块备注器
@@ -284,6 +334,12 @@
     </button>
     <button id="resetViewBtn">
       <span>🔄</span> 重置
+    </button>
+    <button id="exportBtn" class="btn-export">
+      <span>📤</span> 导出
+    </button>
+    <button id="importBtn" class="btn-import">
+      <span>📥</span> 导入
     </button>
     <button id="clearAllBtn" class="btn-danger">
       <span>🗑️</span> 清空
@@ -315,6 +371,8 @@
     const canvas = document.getElementById('chunkCanvas');
     const ctx = canvas.getContext('2d');
     const wrapper = document.getElementById('gridWrapper');
+    const toast = document.getElementById('toast');
+    const fileInput = document.getElementById('fileInput');
 
     const BASE_CELL_SIZE = 120;
     const VIEW_RANGE = 1000;
@@ -342,6 +400,8 @@
     const coordYInput = document.getElementById('coordY');
     const goBtn = document.getElementById('goBtn');
     const resetViewBtn = document.getElementById('resetViewBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
     const clearAllBtn = document.getElementById('clearAllBtn');
     const selectedCoordsSpan = document.getElementById('selectedCoords');
     const contentInput = document.getElementById('contentInput');
@@ -350,11 +410,9 @@
     const storageIndicator = document.getElementById('storageIndicator');
     const zoomIndicator = document.getElementById('zoomIndicator');
 
-    // 检测是否为移动设备
     const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent) || 
                      ('ontouchstart' in window && window.innerWidth < 1024);
     
-    // 桌面端拖拽状态
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
@@ -362,15 +420,22 @@
     let startOffsetY = 0;
     let hasDragged = false;
 
-    // 移动端触摸状态
     let touchStartTime = 0;
     let touchStartPos = { x: 0, y: 0 };
     let touchMoved = false;
     let initialPinchDistance = 0;
     let initialZoom = 1;
     let pinchCenterWorld = { x: 0, y: 0 };
-    let pinchStartOffsetX = 0;
-    let pinchStartOffsetY = 0;
+
+    // ========== Toast ==========
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(toast._timeout);
+      toast._timeout = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2000);
+    }
 
     // ========== 本地存储 ==========
     function saveToStorage() {
@@ -434,6 +499,173 @@
         refresh();
       }
     }
+
+    // ========== 导入导出 ==========
+    function getDataAsJSON() {
+      const dataObj = {};
+      chunkData.forEach((value, key) => {
+        if (value && value.trim() !== '') {
+          dataObj[key] = value;
+        }
+      });
+      return JSON.stringify(dataObj, null, 2);
+    }
+
+    function exportData() {
+      const jsonStr = getDataAsJSON();
+      const dataObj = JSON.parse(jsonStr);
+      const count = Object.keys(dataObj).length;
+      
+      if (count === 0) {
+        showToast('没有可导出的数据');
+        return;
+      }
+
+      // 生成蓝底图片
+      generateExportImage(dataObj).then(blob => {
+        // 下载JSON文件
+        const jsonBlob = new Blob([jsonStr], { type: 'application/json' });
+        const jsonUrl = URL.createObjectURL(jsonBlob);
+        const jsonLink = document.createElement('a');
+        jsonLink.href = jsonUrl;
+        jsonLink.download = `chunk_notes_${Date.now()}.json`;
+        jsonLink.click();
+        URL.revokeObjectURL(jsonUrl);
+
+        // 下载图片
+        const imgUrl = URL.createObjectURL(blob);
+        const imgLink = document.createElement('a');
+        imgLink.href = imgUrl;
+        imgLink.download = `chunk_notes_${Date.now()}.png`;
+        imgLink.click();
+        URL.revokeObjectURL(imgUrl);
+
+        showToast(`已导出 ${count} 条记录（JSON + 图片）`);
+      });
+    }
+
+    function generateExportImage(dataObj) {
+      return new Promise((resolve) => {
+        const entries = Object.entries(dataObj);
+        const padding = 30;
+        const lineHeight = 28;
+        const fontSize = 16;
+        const titleSize = 22;
+        
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        tempCtx.font = `bold ${titleSize}px "Segoe UI", "Roboto", "Microsoft YaHei", sans-serif`;
+        const titleWidth = tempCtx.measureText('区块备注数据').width;
+        
+        tempCtx.font = `${fontSize}px "Segoe UI", "Roboto", "Microsoft YaHei", sans-serif`;
+        let maxWidth = titleWidth;
+        entries.forEach(([key, value]) => {
+          const text = `${key}: ${value}`;
+          const w = tempCtx.measureText(text).width;
+          if (w > maxWidth) maxWidth = w;
+        });
+        
+        const canvasWidth = Math.max(400, maxWidth + padding * 2);
+        const canvasHeight = padding * 2 + titleSize + 20 + entries.length * lineHeight + padding;
+        
+        tempCanvas.width = canvasWidth;
+        tempCanvas.height = canvasHeight;
+        
+        // 蓝底
+        tempCtx.fillStyle = '#1a3a6a';
+        tempCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+        
+        // 边框
+        tempCtx.strokeStyle = '#4a9af5';
+        tempCtx.lineWidth = 3;
+        tempCtx.strokeRect(2, 2, canvasWidth - 4, canvasHeight - 4);
+        
+        // 标题
+        tempCtx.fillStyle = '#ffffff';
+        tempCtx.font = `bold ${titleSize}px "Segoe UI", "Roboto", "Microsoft YaHei", sans-serif`;
+        tempCtx.textAlign = 'center';
+        tempCtx.fillText('📦 区块备注数据', canvasWidth / 2, padding + titleSize);
+        
+        // 分隔线
+        tempCtx.strokeStyle = '#4a9af5';
+        tempCtx.lineWidth = 1;
+        tempCtx.beginPath();
+        tempCtx.moveTo(padding, padding + titleSize + 15);
+        tempCtx.lineTo(canvasWidth - padding, padding + titleSize + 15);
+        tempCtx.stroke();
+        
+        // 数据内容
+        tempCtx.fillStyle = '#d0e8ff';
+        tempCtx.font = `${fontSize}px "Segoe UI", "Roboto", "Microsoft YaHei", sans-serif`;
+        tempCtx.textAlign = 'left';
+        
+        entries.forEach(([key, value], index) => {
+          const y = padding + titleSize + 25 + index * lineHeight;
+          tempCtx.fillStyle = '#7ab8ff';
+          tempCtx.fillText(`${key}:`, padding, y);
+          tempCtx.fillStyle = '#d0e8ff';
+          tempCtx.fillText(value, padding + tempCtx.measureText(`${key}:`).width + 10, y);
+        });
+        
+        // 底部信息
+        tempCtx.fillStyle = '#5a8acf';
+        tempCtx.font = `12px "Segoe UI", "Roboto", sans-serif`;
+        tempCtx.textAlign = 'right';
+        tempCtx.fillText(`总计: ${entries.length} 条 | ${new Date().toLocaleString()}`, canvasWidth - padding, canvasHeight - 15);
+        
+        tempCanvas.toBlob(resolve, 'image/png');
+      });
+    }
+
+    function importData() {
+      fileInput.click();
+    }
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const dataObj = JSON.parse(event.target.result);
+          const entries = Object.entries(dataObj);
+          
+          if (entries.length === 0) {
+            showToast('JSON文件中没有数据');
+            return;
+          }
+          
+          if (chunkData.size > 0) {
+            if (!confirm(`当前有 ${chunkData.size} 条记录，导入将合并数据，是否继续？`)) {
+              fileInput.value = '';
+              return;
+            }
+          }
+          
+          let importCount = 0;
+          entries.forEach(([key, value]) => {
+            if (typeof value === 'string' && value.trim() !== '') {
+              // 验证key格式 "x,y"
+              if (/^-?\d+,-?\d+$/.test(key)) {
+                chunkData.set(key, value.trim());
+                importCount++;
+              }
+            }
+          });
+          
+          saveToStorage();
+          fileInput.value = '';
+          refresh();
+          showToast(`成功导入 ${importCount} 条记录`);
+        } catch (err) {
+          showToast('导入失败：JSON格式错误');
+          fileInput.value = '';
+        }
+      };
+      reader.readAsText(file);
+    });
 
     // ========== 坐标系统 ==========
     function worldToScreen(worldX, worldY) {
@@ -727,14 +959,12 @@
     function setupMobileEvents() {
       wrapper.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
-          // 单指：记录起始位置和时间，用于判断点击还是拖动
           touchStartTime = Date.now();
           touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
           touchMoved = false;
           startOffsetX = offsetScreenX;
           startOffsetY = offsetScreenY;
         } else if (e.touches.length === 2) {
-          // 双指：开始缩放
           initialPinchDistance = getTouchDistance(e.touches);
           initialZoom = zoom;
           const center = getTouchCenter(e.touches);
@@ -742,8 +972,6 @@
           const screenX = center.x - rect.left;
           const screenY = center.y - rect.top;
           pinchCenterWorld = screenToWorld(screenX, screenY);
-          pinchStartOffsetX = offsetScreenX;
-          pinchStartOffsetY = offsetScreenY;
         }
       }, { passive: false });
 
@@ -751,7 +979,6 @@
         e.preventDefault();
         
         if (e.touches.length === 1 && initialPinchDistance === 0) {
-          // 单指拖动
           const dx = e.touches[0].clientX - touchStartPos.x;
           const dy = e.touches[0].clientY - touchStartPos.y;
           if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
@@ -763,7 +990,6 @@
             refresh();
           }
         } else if (e.touches.length === 2) {
-          // 双指缩放
           const currentDistance = getTouchDistance(e.touches);
           const center = getTouchCenter(e.touches);
           const rect = canvas.getBoundingClientRect();
@@ -789,20 +1015,16 @@
 
       wrapper.addEventListener('touchend', (e) => {
         if (e.touches.length === 0) {
-          // 所有手指离开
           if (!touchMoved && initialPinchDistance === 0) {
-            // 单指未移动，视为点击
             const elapsed = Date.now() - touchStartTime;
             if (elapsed < 300) {
               selectChunkAt(touchStartPos.x, touchStartPos.y);
             }
           }
-          // 重置状态
           touchMoved = false;
           initialPinchDistance = 0;
           touchStartTime = 0;
         } else if (e.touches.length === 1) {
-          // 从双指变为单指，更新起始位置防止跳动
           if (initialPinchDistance > 0) {
             touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
             startOffsetX = offsetScreenX;
@@ -860,6 +1082,8 @@
 
     goBtn.addEventListener('click', goToCoordinates);
     resetViewBtn.addEventListener('click', resetView);
+    exportBtn.addEventListener('click', exportData);
+    importBtn.addEventListener('click', importData);
     clearAllBtn.addEventListener('click', clearAllData);
     saveContentBtn.addEventListener('click', saveCurrentContent);
     clearContentBtn.addEventListener('click', clearSelectedContent);
@@ -882,7 +1106,6 @@
       refresh();
     });
 
-    // 根据设备类型设置事件
     if (isMobile) {
       setupMobileEvents();
       wrapper.style.cursor = 'default';
